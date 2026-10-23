@@ -171,27 +171,6 @@ globals:
   - id: last_saved
     type: std::string
     initial_value: '""'
-  # Per-slot replay cooldown. A successful send locks that slot for 5s so
-  # repeated taps do not emit a stream of identical frames. Ignored taps do
-  # NOT extend the cooldown: it always expires 5s after the accepted press.
-  - id: slot1_last_ms
-    type: uint32_t
-    initial_value: '0'
-  - id: slot2_last_ms
-    type: uint32_t
-    initial_value: '0'
-  - id: slot3_last_ms
-    type: uint32_t
-    initial_value: '0'
-  - id: slot4_last_ms
-    type: uint32_t
-    initial_value: '0'
-  - id: slot5_last_ms
-    type: uint32_t
-    initial_value: '0'
-  - id: slot6_last_ms
-    type: uint32_t
-    initial_value: '0'
   # Frames persist in flash. max_restore_data_length must be raised: the
   # default is 63 bytes and the maximum is 254.
   - id: slot1
@@ -274,28 +253,6 @@ script:
             ESP_LOGW("rf_send", "Slot %d is empty", slot);
             return;
           }
-
-          // Per-slot cooldown: one accepted press per 5s. Ignored presses do
-          // not refresh the timer, so the slot always unlocks at the same time.
-          constexpr uint32_t COOLDOWN_MS = 5000;
-          uint32_t *last_ms = nullptr;
-          switch (slot) {
-            case 1: last_ms = &id(slot1_last_ms); break;
-            case 2: last_ms = &id(slot2_last_ms); break;
-            case 3: last_ms = &id(slot3_last_ms); break;
-            case 4: last_ms = &id(slot4_last_ms); break;
-            case 5: last_ms = &id(slot5_last_ms); break;
-            case 6: last_ms = &id(slot6_last_ms); break;
-            default: return;
-          }
-          const uint32_t now = millis();
-          if (*last_ms != 0 && (uint32_t) (now - *last_ms) < COOLDOWN_MS) {
-            ESP_LOGW("rf_send", "Slot %d cooling down (%u ms left)",
-                     slot, (unsigned) (COOLDOWN_MS - (now - *last_ms)));
-            return;
-          }
-          *last_ms = now;
-
           // Slots hold the frame as hex, four bits per character.
           remote_base::RawTimings t;
           t.reserve(s.size() * 4);
