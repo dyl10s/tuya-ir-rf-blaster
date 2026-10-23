@@ -1,5 +1,11 @@
 # Tuya IR + RF Blaster → ESPHome
 
+> **AI-assisted project.** This repo is the result of an AI exploration run with
+> [OpenCode](https://opencode.ai) and DeepSeek. The findings were verified on
+> real hardware (RF captures, OTA flashes, repeated replays), but treat the code
+> and docs as a well-tested starting point rather than an official product.
+> Corrections and issue reports are welcome.
+
 Turn a cheap Tuya "IR + RF" blaster into a fully local ESPHome device with
 **IR transmit**, **433.92 MHz RF receive**, and **433.92 MHz RF transmit**
 (raw record & replay) — entirely over the air. No soldering, no serial, no
