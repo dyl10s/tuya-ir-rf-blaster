@@ -141,6 +141,35 @@ Two details that matter:
 The payload must fit the 32-byte FIFO. A 132-element OOK frame is ~26 bytes at
 417 us/bit.
 
+`send_internal()` — the `RemoteTransmitterBase` hook used by
+`remote_transmitter` actions and by ESPHome's native `infrared` /
+`radio_frequency` proxy entities — calls the same FIFO path with
+`invert = true`. That means the HA entities work without a second transmit
+implementation.
+
+## Native Home Assistant entities
+
+`sh4_rf` is a `RemoteTransmitterBase`, so ESPHome's `ir_rf_proxy` can drive it
+directly:
+
+```yaml
+infrared:
+  - platform: ir_rf_proxy
+    name: "IR Blaster"
+    remote_transmitter_id: ir_tx        # stock remote_transmitter on P7
+
+radio_frequency:
+  - platform: ir_rf_proxy
+    name: "433 MHz RF"
+    frequency: 433.92MHz
+    remote_transmitter_id: rf           # this component
+```
+
+The `radio_frequency` platform validates `carrier_duty_percent` on the
+transmitter; `sh4_rf` does not define that key, so the check passes. The RF
+entity is transmit-only in HA (2026.5+); RF learning remains the custom
+`on_raw` path.
+
 ## ESPHome compatibility
 
 The component targets the ESPHome 2026.x `remote_base` trigger API. On older

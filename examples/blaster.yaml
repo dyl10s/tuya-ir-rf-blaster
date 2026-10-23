@@ -148,6 +148,22 @@ remote_transmitter:
     id: ir_tx
     carrier_duty_percent: 50%
 
+# Native Home Assistant entities (ESPHome 2026.9+).
+# IR: a standard infrared emitter, usable by IR device integrations.
+infrared:
+  - platform: ir_rf_proxy
+    name: "IR Blaster"
+    remote_transmitter_id: ir_tx
+
+# RF: a radio_frequency transmitter (HA 2026.5+). sh4_rf is a
+# RemoteTransmitterBase, so the proxy drives it directly; send_internal()
+# routes through the CMT2300A FIFO engine with inverted polarity.
+radio_frequency:
+  - platform: ir_rf_proxy
+    name: "433 MHz RF"
+    frequency: 433.92MHz
+    remote_transmitter_id: rf
+
 globals:
   - id: learn_slot
     type: int

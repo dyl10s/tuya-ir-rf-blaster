@@ -17,8 +17,50 @@ ESPHome integration (no custom integration needed).
 | `Learn Status` | text sensor | human-readable learn state |
 | `Last RF Code` | text sensor | last raw capture as CSV |
 | `Restart` | button | reboot the device |
+| `IR Blaster` | `infrared` | native IR emitter (HA 2026.4+) |
+| `433 MHz RF` | `radio_frequency` | native RF transmitter (HA 2026.5+) |
 
 Object IDs are the snake_case versions, e.g. `button.ir_rf_blaster_send_slot_1`.
+
+## Native HA IR/RF entities
+
+The config also exposes Home Assistant's standard entity platforms:
+
+```yaml
+infrared:
+  - platform: ir_rf_proxy
+    name: "IR Blaster"
+    remote_transmitter_id: ir_tx
+
+radio_frequency:
+  - platform: ir_rf_proxy
+    name: "433 MHz RF"
+    frequency: 433.92MHz
+    remote_transmitter_id: rf
+```
+
+`ir_rf_proxy` is ESPHome's (experimental, 2026.9+) bridge between Home
+Assistant and `remote_transmitter` / `remote_receiver`. The IR entity is backed
+by the stock IR transmitter. The RF entity is backed by `sh4_rf` itself: it is a
+`RemoteTransmitterBase`, and its `send_internal()` hook routes the proxy's raw
+timings through the CMT2300A FIFO engine with inverted polarity.
+
+What this gives you: the same architecture as the Bluetooth proxy. Any
+device-specific integration that knows your appliance can send codes through
+this hardware, and the entity appears as a normal HA entity instead of a pile of
+buttons.
+
+What it does **not** give you: a generic learn/replay UI. Home Assistant's
+`infrared` and `radio_frequency` integrations are internal building blocks, not
+user-facing services. You still need a consumer integration that knows the
+device (LG Infrared, Samsung Infrared, Honeywell String Lights, Novy hood, ...)
+or a community integration such as `ha-rf-remote` that turns captured codes into
+buttons/switches. For arbitrary remotes, the six learn slots above remain the
+simplest path.
+
+RF **receive** is not part of HA's `radio_frequency` platform yet (it is
+transmit-only as of 2026.5), so learning still uses `Learn Slot N` and the
+ESPHome `on_raw` path.
 
 ## Learning a button
 

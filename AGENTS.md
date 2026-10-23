@@ -22,6 +22,10 @@ working with no error.
 5. **Never change the bit rate via `DR_M` (0x20-0x22).** It collapsed TX to
    ~12 us. Measure the native rate (4-byte vs 16-byte airtime, ~417 us) and
    encode at that.
+6. **Keep `send_internal()` on the FIFO path.** It is the hook used by
+   `remote_transmitter` and by ESPHome's native `infrared` / `radio_frequency`
+   proxy entities. The old direct-mode DIN bit-bang never radiated on this
+   board. It must call `transmit_fifo_auto(..., invert = true)`.
 
 ## Storage rule
 

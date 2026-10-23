@@ -40,6 +40,7 @@ The short version: **use the packet/FIFO engine, and check three register bits**
 | RF receive | ✅ | CMT2300A direct mode, DOUT on P20 |
 | RF transmit | ✅ | packet/FIFO mode, raw replay |
 | Learn & replay from HA | ✅ | 6 persistent slots, no recompile |
+| Native HA IR/RF entities | ✅ | `infrared` (HA 2026.4+) and `radio_frequency` (HA 2026.5+) |
 | OTA updates | ✅ | after the initial cloudcutter flash |
 
 ## Quick start

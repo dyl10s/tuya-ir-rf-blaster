@@ -660,9 +660,10 @@ void SH4RfComponent::set_rx_mode_runtime(RxMode m) {
 
 /* =======================================================================
    TX: send_internal()
-   Called by RemoteTransmitterBase when a transmit_raw / transmit action fires.
-   The CMT2300A is put into TX mode; the CBU then bit-bangs the DIN pin,
-   which the CMT2300A forwards directly to the PA without any encoding.
+   Called by RemoteTransmitterBase when a transmit_raw / transmit action fires,
+   including the native ESPHome infrared / radio_frequency proxy entities.
+   Direct-mode DIN bit-banging never radiated on this board, so everything is
+   routed through the CMT2300A packet/FIFO engine instead.
    ======================================================================= */
 
 void SH4RfComponent::await_target_time_() {
@@ -683,56 +684,16 @@ void SH4RfComponent::space_(uint32_t usec) {
 }
 
 void IRAM_ATTR SH4RfComponent::send_internal(uint32_t send_times, uint32_t send_wait) {
-  ESP_LOGI(TAG, "Transmitting RF code (%u repetition(s))", send_times);
-
-  if (tx_blink_) led_blink_(3, 20, 20);
-
-  if (!start_tx()) {
-    ESP_LOGE(TAG, "TX init failed");
-    return;
-  }
-
-  /* Direct mode TX: bit-bang DIN (P22) while CMT2300A PA is active.
-   * CMT2300A is in GoTx state (direct mode), CBU drives DIN directly. */
-  this->RemoteReceiverBase::pin_->detach_interrupt();
-  high_freq_.stop();
-  transmitting_ = true;
-
-  ESP_LOGI(TAG, "Direct TX bit-bang on pin %d", use_alt_tx_pin_ ? tx_pin_alt_num_ : tx_pin_num_);
-
-  {
-    InterruptLock lock;
-    active_tx_pin_()->digital_write(false);
-    target_time_ = 0;
-    uint32_t bb_start = micros();
-
-    for (uint32_t rep = 0; rep < send_times; rep++) {
-      for (int32_t item : this->RemoteTransmitterBase::temp_.get_data()) {
-        if (item > 0) mark_(static_cast<uint32_t>(item));
-        else          space_(static_cast<uint32_t>(-item));
-      }
-      if (rep + 1 < send_times && send_wait > 0) space_(send_wait);
-    }
-    await_target_time_();
-    active_tx_pin_()->digital_write(false);
-    ESP_LOGI(TAG, "bit-bang took %u us for %u reps", (unsigned)(micros() - bb_start), (unsigned) send_times);
-  }
-
-  transmitting_ = false;
-
-  if (fcsb_ != nullptr) pin_hi(fcsb_);
-
-  if (spi_enabled_) {
-    uint8_t fifo = spi_read_reg(CMT2300A_REG_FIFO_CTL);
-    spi_write_reg(CMT2300A_REG_FIFO_CTL, fifo & (uint8_t) ~0x80u);
-    spi_write_reg(CMT2300A_REG_IO_SEL, saved_io_sel_);
-  }
-
-  if (!receiver_disabled_) {
-    if (!start_rx()) ESP_LOGE(TAG, "Failed to return to RX after TX");
-  } else {
-    go_standby();
-  }
+  /* RemoteTransmitterBase path, used by remote_transmitter actions and by the
+   * native ESPHome infrared / radio_frequency proxy entities.
+   *
+   * The CMT2300A generates the OOK itself from its TX FIFO. Polarity is
+   * inverted because direct-mode DOUT reports carrier as low. `send_wait` is
+   * not used: each FIFO packet is self-contained, and extra repeats just
+   * toggle the target again. */
+  (void) send_wait;
+  uint8_t reps = (uint8_t) (send_times == 0 ? 1 : send_times);
+  transmit_fifo_auto(this->RemoteTransmitterBase::temp_.get_data(), reps, true);
 }
 
 /* =======================================================================
