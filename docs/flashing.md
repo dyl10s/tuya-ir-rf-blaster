@@ -13,24 +13,61 @@ Tuya's own cloud API to install a community firmware. The tool is
 - A **2.4 GHz** Wi-Fi network. The BK7231N cannot see 5 GHz networks.
 - The device powered by USB and reachable.
 - About 15 minutes.
+- **Wired ethernet or a local console.** cloudcutter moves the Wi-Fi adapter
+  into its container, so Wi-Fi on the host drops during the flash.
+
+## Offline flash kit (recommended)
+
+The repo ships three scripts that replace the manual cloudcutter walk-through:
+
+| Script | When | Network |
+|--------|------|---------|
+| `scripts/prepare-offline.sh` | once, before anything | online |
+| `scripts/preflight.sh` | any time; safe, read-only | any |
+| `scripts/flash.sh` | the actual flash | offline once prepared |
+
+```sh
+git clone <this repo>
+cd tuya-ir-rf-blaster
+
+./scripts/prepare-offline.sh   # clone cloudcutter, build image, cache profile + firmware
+./scripts/preflight.sh         # verify adapter/AP mode, image, profile, firmware
+./scripts/flash.sh             # from the machine's own console
+```
+
+`prepare-offline.sh` pins tuya-cloudcutter to the commit this project was tested
+with, builds `cloudcutter:latest`, downloads the BK7231N Kickstart image, and
+caches the device profile plus `combined.json`. After that the flash needs no
+internet. Both `prepare-offline.sh` and `preflight.sh` are idempotent.
+
+`flash.sh` auto-detects the wireless adapter (`ADAPTER=wlan0` to override),
+refuses to run over SSH without ethernet, checks that the adapter supports AP
+mode, walks you through AP mode, then runs:
+
+```sh
+sudo ./tuya-cloudcutter.sh -w "$ADAPTER" -p "$PROFILE" -f "$FWFILE"
+```
 
 ## Step 1 — Identify the device profile
 
-1. Put the device into pairing mode: hold the button until the LED blinks
-   quickly (usually ~5 s), then release.
-2. The device broadcasts a Tuya AP such as `SmartLife-XXXX`.
-3. Run cloudcutter and pick the matching profile. For this puck the profile is a
-   `generic-bk7231n` / "IR Remote" style profile; cloudcutter will also offer
-   ESPHome Kickstart as the replacement firmware.
+The profile used here is:
 
-If cloudcutter cannot match the profile automatically, use the "by firmware
-version" or "by manufacturer" lists. The important part is that the SoC is a
-**BK7231N** and the board is `generic-bk7231n-qfn32-tuya`.
+```
+tuya-generic-ir-rf-universal-remote-controller-v2.0.8
+  → oem-bk7231n-smart-ir-rf-pro-ty-2.0.8-sdk-2.3.1-40.00
+  → chip: BK7231N
+```
+
+To find it manually, put the device into pairing mode (power-cycle 6 times, or
+hold the button ~5 s until the LED blinks), then pick the matching entry in
+cloudcutter. The important part is that the SoC is a **BK7231N** and the ESPHome
+board target is `generic-bk7231n-qfn32-tuya`.
 
 ## Step 2 — Flash the ESPHome kickstart image
 
-Choose the ESPHome Kickstart firmware when cloudcutter asks. It is a minimal
-ESPHome build whose only job is to get on Wi-Fi and expose OTA.
+`flash.sh` does this for you. Manually, choose the **ESPHome Kickstart**
+firmware when cloudcutter asks: a minimal ESPHome build whose only job is to get
+on Wi-Fi and expose OTA.
 
 cloudcutter will:
 

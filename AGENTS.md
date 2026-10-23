@@ -47,10 +47,22 @@ is 600-1700 bytes, so it would silently restore as an empty string.
 ## Layout
 
 ```
-components/sh4_rf/     driver: SPI, RX ISR, packet TX, diagnostics
-examples/blaster.yaml  working config with learn/replay
-docs/                  device, flashing, RF theory, component API, HA usage
+scripts/prepare-offline.sh  cache cloudcutter image + profile + firmware (online, once)
+scripts/preflight.sh        safe checks (never touches the adapter)
+scripts/flash.sh            cloudcutter flash (drops host Wi-Fi)
+components/sh4_rf/          driver: SPI, RX ISR, packet TX, diagnostics
+examples/blaster.yaml       working config with learn/replay
+docs/                       device, flashing, RF theory, component API, HA usage
 ```
+
+## Flashing rules
+
+- Prepare while online; flash offline. `prepare-offline.sh` pins cloudcutter to
+  the tested commit and caches the profile, firmware and Docker image.
+- Run `flash.sh` from the machine's own console, or with wired ethernet. The
+  container takes the Wi-Fi adapter, so SSH over Wi-Fi dies mid-write.
+- The profile is device-specific:
+  `tuya-generic-ir-rf-universal-remote-controller-v2.0.8` (BK7231N).
 
 ## Build
 

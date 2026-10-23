@@ -38,18 +38,36 @@ The short version: **use the packet/FIFO engine, and check three register bits**
 
 ## Quick start
 
-1. **Flash** the device with [tuya-cloudcutter](https://github.com/tuya-cloudcutter/tuya-cloudcutter)
-   using the ESPHome Kickstart firmware. See [docs/flashing.md](docs/flashing.md).
-2. Copy `components/sh4_rf/` into your ESPHome config directory.
-3. Start from [examples/blaster.yaml](examples/blaster.yaml) and
+1. **Prepare the offline flash kit** (once, while online):
+
+   ```sh
+   ./scripts/prepare-offline.sh   # clones cloudcutter, builds image, caches profile + firmware
+   ./scripts/preflight.sh         # safe checks: adapter, AP mode, image, profile, firmware
+   ```
+
+2. **Flash** the device with [tuya-cloudcutter](https://github.com/tuya-cloudcutter/tuya-cloudcutter)
+   using the ESPHome Kickstart firmware:
+
+   ```sh
+   ./scripts/flash.sh             # from the machine's own console
+   ```
+
+   See [docs/flashing.md](docs/flashing.md) for the manual walk-through and
+   recovery notes.
+
+3. Copy `components/sh4_rf/` into your ESPHome config directory.
+4. Start from [examples/blaster.yaml](examples/blaster.yaml) and
    [examples/secrets.yaml.example](examples/secrets.yaml.example).
-4. Compile and upload. From then on everything is OTA.
-5. Learn a remote button (press `Learn Slot 1`, then tap the remote), then
+5. Compile and upload. From then on everything is OTA.
+6. Learn a remote button (press `Learn Slot 1`, then tap the remote), then
    press `Send Slot 1`. See [docs/home-assistant.md](docs/home-assistant.md).
 
 ## Repository layout
 
 ```
+scripts/prepare-offline.sh   one-time: cache everything the flash needs
+scripts/preflight.sh         safe checks before flashing
+scripts/flash.sh             cloudcutter flash, offline-capable
 components/sh4_rf/     ESPHome external component (CMT2300A driver, RX + TX)
 docs/device.md         what the hardware is and how to identify it
 docs/flashing.md       cloudcutter → ESPHome, step by step
