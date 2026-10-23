@@ -1,0 +1,402 @@
+# Example ESPHome configuration for the Tuya IR+RF blaster (BK7231N + CMT2300A).
+#
+# This is a sanitised version of a working config. It provides:
+#   - IR transmit on P7
+#   - RF receive (raw capture) on P20
+#   - RF transmit via the CMT2300A packet/FIFO engine
+#   - 6 persistent learn/replay slots, all usable from Home Assistant
+#
+# Replace `example_frame` with your own capture (see docs/home-assistant.md).
+
+esphome:
+  name: ir-rf-blaster
+  friendly_name: IR-RF Blaster
+  on_boot:
+    priority: 600
+    then:
+      - lambda: 'id(learning).publish_state(false);'
+
+bk72xx:
+  board: generic-bk7231n-qfn32-tuya
+
+logger:
+  level: DEBUG
+
+api:
+  reboot_timeout: 0s
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "Blaster-Fallback"
+
+captive_portal:
+web_server:
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [sh4_rf]
+
+sh4_rf:
+  id: rf
+  spi_enabled: true
+  sclk_pin: P14
+  sdio_pin: P16
+  csb_pin: P6
+  fcsb_pin: P26
+  # TX and RX share P20 on this board revision. Packet mode does not actually
+  # drive the pin; this is only here because tx_pin is otherwise required.
+  tx_on_rx_pin: true
+  rx_pin: P20
+  rx_mode: direct
+  dump: [raw, rc_switch]
+  receiver_disabled: false
+  filter: 50us
+  tolerance: 25%
+  start_pulse_min: 4ms
+  start_pulse_max: 12ms
+  end_pulse: 50ms
+  buffer_size: 2000
+
+  # Learning: when learn_slot != 0, the next complete burst is sliced out and
+  # saved as a quantised hex bit string.
+  on_raw:
+    then:
+      - lambda: |-
+          std::string s;
+          s.reserve(x.size() * 5);
+          for (size_t i = 0; i < x.size(); i++) {
+            if (i > 0) s += ',';
+            s += std::to_string((int) x[i]);
+          }
+          id(last_rf).publish_state(s);
+
+          const int slot = id(learn_slot);
+          if (slot == 0) return;
+
+          /* Slice exactly one frame: from the sync pulse up to (not including)
+           * the trailing end pulse. end is exclusive, so the frame is
+           * x[start .. end-1] and keeps its final space. Compare magnitudes
+           * because the end pulse can be negative. */
+          size_t start = 0;
+          while (start < x.size() && std::abs(x[start]) < 2000) start++;
+          size_t end = x.size();
+          for (size_t i = start + 1; i < x.size(); i++) {
+            if (std::abs(x[i]) >= 2000) { end = i; break; }
+          }
+          if (end <= start + 20) end = x.size();
+          if (end - start < 20) return;
+
+          /* Store quantised bits as hex. A raw CSV is far too large for an
+           * ESPHome string global (254 bytes max), so it would not survive a
+           * reboot. 208 bits = 52 hex chars and is the same payload the
+           * transmitter builds anyway. */
+          const int32_t unit_us = 417;
+          std::string hex;
+          hex.reserve(60);
+          unsigned cur = 0, nbits = 0, nbits_total = 0;
+          char b[3];
+          for (size_t i = start; i < end; i++) {
+            int32_t v = x[i];
+            int32_t units = (std::abs(v) + unit_us / 2) / unit_us;
+            if (units < 1) units = 1;
+            for (int32_t k = 0; k < units; k++) {
+              cur = (cur << 1) | (v > 0 ? 1u : 0u);
+              nbits_total++;
+              if (++nbits == 8) {
+                snprintf(b, sizeof(b), "%02x", cur);
+                hex += b;
+                cur = 0;
+                nbits = 0;
+              }
+            }
+          }
+          if (nbits) {
+            cur <<= (8 - nbits);
+            snprintf(b, sizeof(b), "%02x", cur);
+            hex += b;
+          }
+
+          switch (slot) {
+            case 1: id(slot1) = hex; break;
+            case 2: id(slot2) = hex; break;
+            case 3: id(slot3) = hex; break;
+            case 4: id(slot4) = hex; break;
+            case 5: id(slot5) = hex; break;
+            case 6: id(slot6) = hex; break;
+          }
+          id(learn_slot) = 0;
+          id(learning).publish_state(false);
+          char msg[72];
+          snprintf(msg, sizeof(msg), "Slot %d saved (%u bits, %u bytes)",
+                   slot, nbits_total, (unsigned) hex.size() / 2);
+          id(last_saved) = msg;
+          ESP_LOGI("rf_learn", "%s", msg);
+          ESP_LOGI("rf_learn", "hex: %s", hex.c_str());
+
+status_led:
+  pin: P9
+
+remote_transmitter:
+  - pin: P7
+    id: ir_tx
+    carrier_duty_percent: 50%
+
+globals:
+  - id: learn_slot
+    type: int
+    initial_value: '0'
+  - id: last_saved
+    type: std::string
+    initial_value: '""'
+  # Frames persist in flash. max_restore_data_length must be raised: the
+  # default is 63 bytes and the maximum is 254.
+  - id: slot1
+    type: std::string
+    restore_value: yes
+    max_restore_data_length: 200
+    initial_value: '""'
+  - id: slot2
+    type: std::string
+    restore_value: yes
+    max_restore_data_length: 200
+    initial_value: '""'
+  - id: slot3
+    type: std::string
+    restore_value: yes
+    max_restore_data_length: 200
+    initial_value: '""'
+  - id: slot4
+    type: std::string
+    restore_value: yes
+    max_restore_data_length: 200
+    initial_value: '""'
+  - id: slot5
+    type: std::string
+    restore_value: yes
+    max_restore_data_length: 200
+    initial_value: '""'
+  - id: slot6
+    type: std::string
+    restore_value: yes
+    max_restore_data_length: 200
+    initial_value: '""'
+
+binary_sensor:
+  - platform: template
+    name: "Learning"
+    id: learning
+    icon: mdi:record-rec
+    device_class: running
+
+text_sensor:
+  - platform: template
+    name: "Learn Status"
+    id: learn_status
+    icon: mdi:information-outline
+    update_interval: 1s
+    lambda: |-
+      const int s = id(learn_slot);
+      if (s != 0) {
+        char buf[48];
+        snprintf(buf, sizeof(buf), "Listening for slot %d - press remote now", s);
+        return std::string(buf);
+      }
+      if (!id(last_saved).empty()) return id(last_saved);
+      return std::string("Idle");
+
+  - platform: template
+    name: "Last RF Code"
+    id: last_rf
+    icon: mdi:signal-variant
+
+script:
+  - id: send_slot
+    parameters:
+      slot: int
+      reps: int
+    then:
+      - lambda: |-
+          std::string s;
+          switch (slot) {
+            case 1: s = id(slot1); break;
+            case 2: s = id(slot2); break;
+            case 3: s = id(slot3); break;
+            case 4: s = id(slot4); break;
+            case 5: s = id(slot5); break;
+            case 6: s = id(slot6); break;
+            default: return;
+          }
+          if (s.empty()) {
+            ESP_LOGW("rf_send", "Slot %d is empty", slot);
+            return;
+          }
+          // Slots hold the frame as hex, four bits per character.
+          remote_base::RawTimings t;
+          t.reserve(s.size() * 4);
+          for (char c : s) {
+            int v;
+            if (c >= '0' && c <= '9') v = c - '0';
+            else if (c >= 'a' && c <= 'f') v = c - 'a' + 10;
+            else if (c >= 'A' && c <= 'F') v = c - 'A' + 10;
+            else continue;
+            for (int k = 3; k >= 0; k--) t.push_back((v & (1 << k)) ? 417 : -417);
+          }
+          ESP_LOGI("rf_send", "slot %d parsed %u bits, %u reps", slot,
+                   (unsigned) t.size(), (unsigned) reps);
+          // Inverted polarity: this module's direct-mode DOUT reports carrier
+          // as low, so captured marks are gaps on air.
+          id(rf).send_fifo_auto(t, (uint8_t) reps, true);
+          ESP_LOGI("rf_send", "Sent slot %d (%u samples x%d, inverted)",
+                   slot, (unsigned) t.size(), reps);
+
+button:
+  # Example frame: a 132-element OOK burst captured from a 433.92 MHz remote.
+  # Replace it with your own capture, or just use the learn slots.
+  - platform: template
+    name: "Send Example Frame"
+    icon: mdi:remote
+    on_press:
+      - lambda: |-
+          static const int32_t example_frame[] = {
+            4845,-407,812,-813,406,-407,812,-782,437,-782,406,-406,813,-406,813,-812,
+            407,-781,444,-369,844,-375,812,-407,812,-781,438,-813,374,-845,375,-437,
+            782,-437,781,-407,812,-407,781,-438,812,-375,813,-406,813,-816,403,-781,
+            438,-406,813,-389,799,-406,814,-436,782,-406,813,-406,781,-407,812,-438,
+            781,-438,813,-375,844,-375,812,-441,778,-407,812,-407,812,-406,782,-437,
+            782,-813,406,-406,816,-403,813,-406,782,-437,813,-375,844,-375,816,-809,
+            375,-438,816,-371,844,-375,813,-813,409,-810,406,-781,438,-812,407,-781,
+            406,-813,438,-781,406,-816,404,-406,781,-813,437,-785,434,-782,406,-406,
+            813,-406,813,-413
+          };
+          remote_base::RawTimings t(std::begin(example_frame), std::end(example_frame));
+          ESP_LOGI("rf_send", "example frame: %u samples", (unsigned) t.size());
+          id(rf).send_fifo_auto(t, 1, true);
+
+  - platform: template
+    name: "Send Example Frame (normal polarity)"
+    icon: mdi:remote
+    entity_category: diagnostic
+    on_press:
+      - lambda: |-
+          static const int32_t example_frame[] = {
+            4845,-407,812,-813,406,-407,812,-782,437,-782,406,-406,813,-406,813,-812,
+            407,-781,444,-369,844,-375,812,-407,812,-781,438,-813,374,-845,375,-437,
+            782,-437,781,-407,812,-407,781,-438,812,-375,813,-406,813,-816,403,-781,
+            438,-406,813,-389,799,-406,814,-436,782,-406,813,-406,781,-407,812,-438,
+            781,-438,813,-375,844,-375,812,-441,778,-407,812,-407,812,-406,782,-437,
+            782,-813,406,-406,816,-403,813,-406,782,-437,813,-375,844,-375,816,-809,
+            375,-438,816,-371,844,-375,813,-813,409,-810,406,-781,438,-812,407,-781,
+            406,-813,438,-781,406,-816,404,-406,781,-813,437,-785,434,-782,406,-406,
+            813,-406,813,-413
+          };
+          remote_base::RawTimings t(std::begin(example_frame), std::end(example_frame));
+          ESP_LOGI("rf_send", "example frame: %u samples (normal)", (unsigned) t.size());
+          id(rf).send_fifo_auto(t, 1, false);
+
+  - platform: template
+    name: "Learn Slot 1"
+    icon: mdi:record-rec
+    on_press:
+      - lambda: 'id(learn_slot) = 1; id(learning).publish_state(true); ESP_LOGI("rf_learn", "Listening for slot 1 - press the remote");'
+  - platform: template
+    name: "Learn Slot 2"
+    icon: mdi:record-rec
+    on_press:
+      - lambda: 'id(learn_slot) = 2; id(learning).publish_state(true); ESP_LOGI("rf_learn", "Listening for slot 2 - press the remote");'
+  - platform: template
+    name: "Learn Slot 3"
+    icon: mdi:record-rec
+    on_press:
+      - lambda: 'id(learn_slot) = 3; id(learning).publish_state(true); ESP_LOGI("rf_learn", "Listening for slot 3 - press the remote");'
+  - platform: template
+    name: "Learn Slot 4"
+    icon: mdi:record-rec
+    on_press:
+      - lambda: 'id(learn_slot) = 4; id(learning).publish_state(true); ESP_LOGI("rf_learn", "Listening for slot 4 - press the remote");'
+  - platform: template
+    name: "Learn Slot 5"
+    icon: mdi:record-rec
+    on_press:
+      - lambda: 'id(learn_slot) = 5; id(learning).publish_state(true); ESP_LOGI("rf_learn", "Listening for slot 5 - press the remote");'
+  - platform: template
+    name: "Learn Slot 6"
+    icon: mdi:record-rec
+    on_press:
+      - lambda: 'id(learn_slot) = 6; id(learning).publish_state(true); ESP_LOGI("rf_learn", "Listening for slot 6 - press the remote");'
+
+  - platform: template
+    name: "Cancel Learn"
+    icon: mdi:close
+    on_press:
+      - lambda: 'id(learn_slot) = 0; id(learning).publish_state(false); ESP_LOGI("rf_learn", "Learn cancelled");'
+
+  - platform: template
+    name: "Send Slot 1"
+    icon: mdi:remote
+    on_press:
+      - script.execute: {id: send_slot, slot: 1, reps: 1}
+  - platform: template
+    name: "Send Slot 2"
+    icon: mdi:remote
+    on_press:
+      - script.execute: {id: send_slot, slot: 2, reps: 1}
+  - platform: template
+    name: "Send Slot 3"
+    icon: mdi:remote
+    on_press:
+      - script.execute: {id: send_slot, slot: 3, reps: 1}
+  - platform: template
+    name: "Send Slot 4"
+    icon: mdi:remote
+    on_press:
+      - script.execute: {id: send_slot, slot: 4, reps: 1}
+  - platform: template
+    name: "Send Slot 5"
+    icon: mdi:remote
+    on_press:
+      - script.execute: {id: send_slot, slot: 5, reps: 1}
+  - platform: template
+    name: "Send Slot 6"
+    icon: mdi:remote
+    on_press:
+      - script.execute: {id: send_slot, slot: 6, reps: 1}
+
+  - platform: template
+    name: "Dump Slots"
+    icon: mdi:content-duplicate
+    entity_category: diagnostic
+    on_press:
+      - lambda: |-
+          for (int i = 1; i <= 6; i++) {
+            std::string s;
+            switch (i) {
+              case 1: s = id(slot1); break;
+              case 2: s = id(slot2); break;
+              case 3: s = id(slot3); break;
+              case 4: s = id(slot4); break;
+              case 5: s = id(slot5); break;
+              case 6: s = id(slot6); break;
+            }
+            ESP_LOGI("rf_dump", "slot%d bytes=%u :: %s", i, (unsigned) s.size(), s.c_str());
+          }
+
+  - platform: restart
+    name: "Restart"
+    entity_category: diagnostic
+
+sensor:
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 120s
+    entity_category: diagnostic
+  - platform: uptime
+    name: "Uptime"
+    update_interval: 300s
+    entity_category: diagnostic
